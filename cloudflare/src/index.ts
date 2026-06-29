@@ -1,14 +1,4 @@
 // Cloudflare Worker — ShortLink API
-// GET  /r/:slug              → redirect + catat klik
-// POST /api/links            → buat link baru
-// GET  /api/links            → list links (role-aware)
-// DELETE /api/links/:id      → hapus link (admin/super_admin)
-// GET  /api/links/:id/stats  → statistik per link
-// GET  /api/users            → list users (admin+)
-// PATCH /api/users/:id/role  → ubah role (super_admin only)
-// GET  /api/logs             → activity logs (super_admin only)
-// POST /api/auth/request-token → kirim magic link
-// POST /api/auth/verify-token  → verifikasi token → session
 
 interface Env {
   DB: D1Database;
@@ -22,6 +12,10 @@ interface User {
   email: string;
   name: string | null;
   role: 'user' | 'admin' | 'super_admin';
+}
+
+interface UserWithPassword extends User {
+  password: string | null;
 }
 
 function json(data: unknown, status = 200): Response {
@@ -82,6 +76,31 @@ export default {
     const path = url.pathname;
     const method = req.method;
 
+    // ── AUTH: Login dengan email + password ───────────────────
+    if (method === 'POST' && path === '/api/auth/login') {
+      const { email, password } = await req.json<{ email: string; password: string }>();
+      if (!email || !password) return err('Email dan password diperlukan');
+
+      let row = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<UserWithPassword>();
+
+      if (!row) {
+        // User belum ada — daftar otomatis
+        await env.DB.prepare('INSERT INTO users (email, password) VALUES (?, ?)').bind(email, password).run();
+        row = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<UserWithPassword>();
+      } else if (row.password === null) {
+        // User lama (dari era magic link) — set password pertama kali
+        await env.DB.prepare('UPDATE users SET password = ? WHERE email = ?').bind(password, email).run();
+      } else if (row.password !== password) {
+        return err('Password salah', 401);
+      }
+
+      const user: User = { id: row!.id, email: row!.email, name: row!.name, role: row!.role };
+      const sessionToken = generateSlug(48);
+      await env.CACHE.put(`session:${sessionToken}`, JSON.stringify(user), { expirationTtl: 7 * 24 * 3600 });
+      return json({ sessionToken, user });
+    }
+
+    // ── REDIRECT (/r/:slug) ───────────────────────────────────
     if (method === 'GET' && path.startsWith('/r/')) {
       const slug = path.slice(3);
       if (!slug) return err('No slug', 404);
@@ -107,33 +126,7 @@ export default {
       return Response.redirect(original, 302);
     }
 
-    if (method === 'POST' && path === '/api/auth/request-token') {
-      const { email } = await req.json<{ email: string }>();
-      if (!email) return err('Email required');
-      let user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<User>();
-      if (!user) {
-        await env.DB.prepare('INSERT INTO users (email) VALUES (?)').bind(email).run();
-        user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<User>();
-      }
-      const token = generateSlug(32);
-      const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-      await env.DB.prepare('INSERT INTO auth_tokens (email, token, expires_at) VALUES (?,?,?)').bind(email, token, expires).run();
-      return json({ token, email, userId: user!.id });
-    }
-
-    if (method === 'POST' && path === '/api/auth/verify-token') {
-      const { token } = await req.json<{ token: string }>();
-      if (!token) return err('Token required');
-      const row = await env.DB.prepare('SELECT * FROM auth_tokens WHERE token = ? AND used = 0 AND expires_at > ?').bind(token, new Date().toISOString()).first<{ email: string; id: string }>();
-      if (!row) return err('Token invalid or expired', 401);
-      await env.DB.prepare('UPDATE auth_tokens SET used = 1 WHERE id = ?').bind(row.id).run();
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(row.email).first<User>();
-      if (!user) return err('User not found', 404);
-      const sessionToken = generateSlug(48);
-      await env.CACHE.put(`session:${sessionToken}`, JSON.stringify(user), { expirationTtl: 7 * 24 * 3600 });
-      return json({ sessionToken, user });
-    }
-
+    // ── LINKS: Buat link baru ─────────────────────────────────
     if (method === 'POST' && path === '/api/links') {
       const userOrRes = await requireAuth(req, env);
       if (userOrRes instanceof Response) return userOrRes;
@@ -158,6 +151,7 @@ export default {
       return json(result, 201);
     }
 
+    // ── LINKS: List ───────────────────────────────────────────
     if (method === 'GET' && path === '/api/links') {
       const userOrRes = await requireAuth(req, env);
       if (userOrRes instanceof Response) return userOrRes;
@@ -174,6 +168,7 @@ export default {
       return json(rows.results);
     }
 
+    // ── LINKS: Hapus ──────────────────────────────────────────
     if (method === 'DELETE' && path.startsWith('/api/links/')) {
       const userOrRes = await requireRole(req, env, ['admin', 'super_admin']);
       if (userOrRes instanceof Response) return userOrRes;
@@ -187,6 +182,7 @@ export default {
       return json({ success: true });
     }
 
+    // ── LINKS: Stats ──────────────────────────────────────────
     if (method === 'GET' && path.match(/^\/api\/links\/[^/]+\/stats$/)) {
       const userOrRes = await requireAuth(req, env);
       if (userOrRes instanceof Response) return userOrRes;
@@ -199,6 +195,7 @@ export default {
       return json({ link, daily_clicks: dailyClicks.results });
     }
 
+    // ── USERS: List ───────────────────────────────────────────
     if (method === 'GET' && path === '/api/users') {
       const userOrRes = await requireRole(req, env, ['admin', 'super_admin']);
       if (userOrRes instanceof Response) return userOrRes;
@@ -206,6 +203,7 @@ export default {
       return json(users.results);
     }
 
+    // ── USERS: Ubah role ──────────────────────────────────────
     if (method === 'PATCH' && path.match(/^\/api\/users\/[^/]+\/role$/)) {
       const userOrRes = await requireRole(req, env, ['super_admin']);
       if (userOrRes instanceof Response) return userOrRes;
@@ -223,6 +221,7 @@ export default {
       return json({ success: true, old_role: oldRole, new_role: role });
     }
 
+    // ── LOGS: Activity (super_admin only) ─────────────────────
     if (method === 'GET' && path === '/api/logs') {
       const userOrRes = await requireRole(req, env, ['super_admin']);
       if (userOrRes instanceof Response) return userOrRes;
@@ -237,6 +236,7 @@ export default {
       return json({ logs: logs.results, total: total?.count ?? 0, page, limit });
     }
 
+    // ── ME: Info user saat ini ────────────────────────────────
     if (method === 'GET' && path === '/api/me') {
       const user = await getSession(req, env);
       if (!user) return err('Unauthorized', 401);
