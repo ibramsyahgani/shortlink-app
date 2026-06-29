@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
 const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL!;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL!;
 
@@ -9,6 +7,11 @@ export async function POST(req: NextRequest) {
   const { email } = await req.json();
   if (!email || !email.includes('@')) {
     return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
+  }
+
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    return NextResponse.json({ error: 'Email service tidak dikonfigurasi' }, { status: 503 });
   }
 
   const workerRes = await fetch(`${WORKER_URL}/api/auth/request-token`, {
@@ -24,6 +27,9 @@ export async function POST(req: NextRequest) {
 
   const { token } = await workerRes.json() as { token: string };
   const magicLink = `${APP_URL}/auth/verify?token=${token}`;
+
+  const { Resend } = await import('resend');
+  const resend = new Resend(resendApiKey);
 
   await resend.emails.send({
     from: process.env.FROM_EMAIL!,
