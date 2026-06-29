@@ -1,4 +1,12 @@
-const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL!;
+// Worker URL dengan fallback hardcode untuk development
+const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || 'https://shortlink-api.ibramsyahgani1.workers.dev';
+
+// Token dummy super_admin — di-set otomatis, tidak perlu login
+const DUMMY_TOKEN = 'dummy-super-admin-token-ibramsyah';
+
+if (typeof window !== 'undefined') {
+  localStorage.setItem('sl_token', DUMMY_TOKEN);
+}
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -16,19 +24,21 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return data as T;
 }
 
-// ── Auth ──────────────────────────────────────────────────────
+// ── Auth ─────────────────────────────────────────────────────
 export async function login(email: string, password: string): Promise<{ sessionToken: string; user: User }> {
   const data = await apiFetch<{ sessionToken: string; user: User }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('sl_token', data.sessionToken);
-  }
+  if (typeof window !== 'undefined') localStorage.setItem('sl_token', data.sessionToken);
   return data;
 }
 
-export function logout() { localStorage.removeItem('sl_token'); window.location.href = '/login'; }
+export function logout() {
+  localStorage.setItem('sl_token', DUMMY_TOKEN);
+  window.location.href = '/dashboard';
+}
+
 export function isLoggedIn(): boolean { return !!getToken(); }
 
 // ── Links ─────────────────────────────────────────────────────
@@ -41,7 +51,7 @@ export async function getLinkStats(id: string) { return apiFetch(`/api/links/${i
 export async function getUsers(): Promise<UserRow[]> { return apiFetch('/api/users'); }
 export async function updateUserRole(userId: string, role: string) { return apiFetch(`/api/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }); }
 
-// ── Logs ──────────────────────────────────────────────────────
+// ── Logs ─────────────────────────────────────────────────────
 export async function getLogs(params?: { page?: number; action?: string; search?: string }) {
   const q = new URLSearchParams();
   if (params?.page) q.set('page', String(params.page));
@@ -50,7 +60,7 @@ export async function getLogs(params?: { page?: number; action?: string; search?
   return apiFetch<{ logs: LogRow[]; total: number; page: number }>(`/api/logs?${q}`);
 }
 
-// ── Me ────────────────────────────────────────────────────────
+// ── Me ───────────────────────────────────────────────────────
 export async function getMe(): Promise<User> { return apiFetch('/api/me'); }
 
 // ── Types ─────────────────────────────────────────────────────
