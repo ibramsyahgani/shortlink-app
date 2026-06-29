@@ -1,0 +1,18 @@
+name = "shortlink-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shortlink-db"
+database_id = "2d62b292-e923-4e53-bea6-6834bfea8333"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "4c1faefbde694bbb8db4b27c9cc026d6"
+
+[vars]
+NEXT_APP_URL  = "https://shortlink-app.vercel.app"
+
+# WORKER_SECRET diset via: wrangler secret put WORKER_SECRET
