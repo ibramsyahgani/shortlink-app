@@ -46,8 +46,13 @@ async function getSession(req: Request, env: Env): Promise<User | null> {
   const auth = req.headers.get('Authorization') || '';
   const token = auth.replace('Bearer ', '').trim();
   if (!token) return null;
-  // Dummy token untuk super_admin tanpa DB
-  if (token === DUMMY_TOKEN) return DUMMY_USER;
+  // Dummy token untuk super_admin — pastikan user ada di DB agar FK & JOIN tidak gagal
+  if (token === DUMMY_TOKEN) {
+    await env.DB.prepare(
+      'INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?, ?, ?, ?)'
+    ).bind(DUMMY_USER.id, DUMMY_USER.email, DUMMY_USER.name ?? 'Super Admin', DUMMY_USER.role).run();
+    return DUMMY_USER;
+  }
   const cached = await env.CACHE.get(`session:${token}`);
   if (!cached) return null;
   return JSON.parse(cached) as User;
@@ -148,7 +153,9 @@ export default {
           slug = generateSlug(6);
           const exists = await env.DB.prepare('SELECT id FROM links WHERE slug = ?').bind(slug).first();
           if (!exists) break;
-        } while (++tries < 10);
+          tries++;
+        } while (tries < 10);
+        if (!slug) return err('Gagal generate slug, coba lagi', 500);
       }
       const result = await env.DB.prepare('INSERT INTO links (slug, original_url, user_id) VALUES (?,?,?) RETURNING *').bind(slug, original_url, actor.id).first<{ id: string; slug: string; original_url: string; created_at: string }>();
       await log(env, actor, 'create_link', 'link', result!.id, slug, original_url);
