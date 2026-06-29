@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
 import { getMe, getLinks, createLink, deleteLink, type User, type LinkRow } from '@/lib/api';
 
-const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL!;
+const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || 'https://shortlink-api.ibramsyahgani1.workers.dev';
 
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -15,7 +15,7 @@ export default function DashboardPage() {
   const [copied, setCopied] = useState('');
 
   useEffect(() => {
-    getMe().then(setUser).catch(() => { window.location.href = '/login'; });
+    getMe().then(setUser).catch(() => {});
     fetchLinks();
   }, []);
 
@@ -69,18 +69,22 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
           <h2 className="font-medium text-gray-900 mb-4">Buat short link baru</h2>
           <form onSubmit={handleCreate} className="space-y-3">
-            <input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://url-panjang-kamu.com/path/yang/panjang" required className="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+            <input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://url-panjang-kamu.com/path/yang/panjang" required
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
             <div className="flex gap-3">
               <div className="flex items-center flex-1 gap-2 px-3 py-2.5 rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-blue-500">
                 <span className="text-sm text-gray-400 whitespace-nowrap">/r/</span>
-                <input type="text" value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9\-_]/g, ''))} placeholder="custom-slug (opsional)" className="flex-1 text-sm outline-none bg-transparent" />
+                <input type="text" value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9\-_]/g, ''))}
+                  placeholder="custom-slug (opsional)"
+                  className="flex-1 text-sm outline-none bg-transparent text-gray-900 placeholder:text-gray-400" />
               </div>
-              <button type="submit" disabled={loading || !url} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition-colors whitespace-nowrap">
+              <button type="submit" disabled={loading || !url}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition-colors whitespace-nowrap">
                 {loading ? 'Membuat...' : 'Buat link →'}
               </button>
             </div>
             {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>}
-            <p className="text-xs text-gray-400">Kosongkan slug untuk generate otomatis. Slug hanya boleh huruf kecil, angka, - dan _.</p>
+            <p className="text-xs text-gray-400">Kosongkan slug untuk generate otomatis.</p>
           </form>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -98,7 +102,9 @@ export default function DashboardPage() {
                   <span className="text-sm text-gray-500 flex-1 truncate">{link.original_url}</span>
                   {user?.role !== 'user' && <span className="text-xs text-gray-400 whitespace-nowrap">{link.user_email}</span>}
                   <span className="text-xs text-gray-400 whitespace-nowrap">{link.click_count.toLocaleString('id')} klik</span>
-                  <button onClick={() => copyLink(link.slug)} className="text-xs px-2.5 py-1 rounded-md border border-gray-200 hover:bg-gray-100 transition-colors text-gray-500">{copied === link.slug ? '✓ Disalin' : 'Salin'}</button>
+                  <button onClick={() => copyLink(link.slug)} className="text-xs px-2.5 py-1 rounded-md border border-gray-200 hover:bg-gray-100 transition-colors text-gray-500">
+                    {copied === link.slug ? '✓ Disalin' : 'Salin'}
+                  </button>
                   {canDelete && <button onClick={() => handleDelete(link.id)} className="text-xs px-2.5 py-1 rounded-md border border-red-200 hover:bg-red-50 text-red-500 transition-colors">Hapus</button>}
                 </div>
               ))}

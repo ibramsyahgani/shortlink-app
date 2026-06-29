@@ -19,13 +19,14 @@ export default function AdminLogsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getMe().then(u => { if (u.role !== 'super_admin') { window.location.href = '/dashboard'; } }).catch(() => { window.location.href = '/login'; });
+    getMe().then(u => { if (u.role !== 'super_admin') { window.location.href = '/dashboard'; } }).catch(() => {});
   }, []);
 
   useEffect(() => {
     setLoading(true);
     getLogs({ page, action: action || undefined, search: search || undefined })
-      .then(d => { setLogs(d.logs); setTotal(d.total); }).finally(() => setLoading(false));
+      .then(d => { setLogs(d.logs); setTotal(d.total); })
+      .finally(() => setLoading(false));
   }, [page, action, search]);
 
   const totalPages = Math.ceil(total / 20);
@@ -38,11 +39,13 @@ export default function AdminLogsPage() {
           <div className="px-6 py-4 border-b border-gray-100 bg-purple-50 flex items-center justify-between flex-wrap gap-3">
             <div><h1 className="font-semibold text-purple-900">Log aktivitas sistem</h1><p className="text-xs text-purple-500 mt-0.5">{total.toLocaleString('id')} total entri</p></div>
             <div className="flex gap-2">
-              <select value={action} onChange={e => { setAction(e.target.value); setPage(1); }} className="text-sm px-3 py-2 rounded-lg border border-purple-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400">
+              <select value={action} onChange={e => { setAction(e.target.value); setPage(1); }}
+                className="text-sm px-3 py-2 rounded-lg border border-purple-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400">
                 <option value="">Semua aksi</option>
                 {Object.entries(ACTION_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
-              <input type="text" placeholder="Cari email / slug..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="text-sm px-3 py-2 rounded-lg border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-400 w-44" />
+              <input type="text" placeholder="Cari email / slug..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+                className="text-sm px-3 py-2 rounded-lg border border-purple-200 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 w-44" />
             </div>
           </div>
           {loading ? <div className="py-12 text-center text-gray-400 text-sm">Memuat...</div> : logs.length === 0 ? <div className="py-12 text-center text-gray-400 text-sm">Tidak ada log ditemukan.</div> : (
