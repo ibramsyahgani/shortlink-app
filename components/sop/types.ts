@@ -16,6 +16,8 @@ export interface FileAttachment {
   size: number;
   type: string;
   uploadedAt: string;
+  // r2-backed file has fileId for server delete
+  fileId?: string;
 }
 
 export interface FilterState {
@@ -25,11 +27,4 @@ export interface FilterState {
   topik: string;
   subTopik: string;
   sopDokumen: string;
-}
-
-export interface SidebarCategory {
-  id: string;
-  label: string;
-  icon: string;
-  count: number;
 }

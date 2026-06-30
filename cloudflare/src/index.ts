@@ -3,6 +3,7 @@
 interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
+  SOP_FILES: R2Bucket;
   WORKER_SECRET: string;
   NEXT_APP_URL: string;
 }
@@ -253,6 +254,126 @@ export default {
       const user = await getSession(req, env);
       if (!user) return err('Unauthorized', 401);
       return json(user);
+    }
+
+    // ── SOP: List rows ───────────────────────────────────────────
+    if (method === 'GET' && path === '/api/sop') {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const kategori = url.searchParams.get('kategori') || '';
+      const rows = await env.DB.prepare(
+        `SELECT r.*, json_group_array(json_object(
+          'id', f.id, 'file_name', f.file_name, 'file_size', f.file_size,
+          'file_type', f.file_type, 'r2_key', f.r2_key, 'uploaded_at', f.uploaded_at
+        )) as files
+        FROM sop_rows r
+        LEFT JOIN sop_files f ON f.sop_row_id = r.id
+        ${kategori ? "WHERE r.kategori = ?" : ""}
+        GROUP BY r.id
+        ORDER BY r.sort_order ASC, r.created_at ASC`
+      ).bind(...(kategori ? [kategori] : [])).all<Record<string, unknown>>();
+
+      const result = rows.results.map(row => ({
+        ...row,
+        files: JSON.parse(row.files as string).filter((f: Record<string, unknown>) => f.id !== null),
+      }));
+      return json(result);
+    }
+
+    // ── SOP: Create row ──────────────────────────────────────────
+    if (method === 'POST' && path === '/api/sop') {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const body = await req.json<{ kategori?: string; pic?: string; product?: string; topik?: string; subTopik?: string; sopDokumen?: string }>();
+      const row = await env.DB.prepare(
+        `INSERT INTO sop_rows (kategori, pic, product, topik, sub_topik, sop_dokumen)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`
+      ).bind(
+        body.kategori || '', body.pic || '', body.product || '',
+        body.topik || '', body.subTopik || '', body.sopDokumen || ''
+      ).first<Record<string, unknown>>();
+      return json({ ...row, files: [] }, 201);
+    }
+
+    // ── SOP: Update row ──────────────────────────────────────────
+    if (method === 'PATCH' && path.match(/^\/api\/sop\/[^/]+$/) && !path.includes('/files')) {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const rowId = path.split('/')[3];
+      const body = await req.json<{ kategori?: string; pic?: string; product?: string; topik?: string; subTopik?: string; sopDokumen?: string }>();
+      await env.DB.prepare(
+        `UPDATE sop_rows SET kategori=?, pic=?, product=?, topik=?, sub_topik=?, sop_dokumen=?, updated_at=datetime('now')
+         WHERE id=?`
+      ).bind(
+        body.kategori ?? '', body.pic ?? '', body.product ?? '',
+        body.topik ?? '', body.subTopik ?? '', body.sopDokumen ?? '', rowId
+      ).run();
+      return json({ success: true });
+    }
+
+    // ── SOP: Delete row ──────────────────────────────────────────
+    if (method === 'DELETE' && path.match(/^\/api\/sop\/[^/]+$/) && !path.includes('/files')) {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const rowId = path.split('/')[3];
+      // Delete R2 files first
+      const files = await env.DB.prepare('SELECT r2_key FROM sop_files WHERE sop_row_id = ?').bind(rowId).all<{ r2_key: string }>();
+      for (const f of files.results) await env.SOP_FILES.delete(f.r2_key);
+      await env.DB.prepare('DELETE FROM sop_rows WHERE id = ?').bind(rowId).run();
+      return json({ success: true });
+    }
+
+    // ── SOP Files: Upload ────────────────────────────────────────
+    if (method === 'POST' && path.match(/^\/api\/sop\/[^/]+\/files$/)) {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const rowId = path.split('/')[3];
+      const row = await env.DB.prepare('SELECT id FROM sop_rows WHERE id = ?').bind(rowId).first();
+      if (!row) return err('SOP row not found', 404);
+
+      const fileName = req.headers.get('X-File-Name') || 'file';
+      const fileType = req.headers.get('Content-Type') || 'application/octet-stream';
+      const fileSize = parseInt(req.headers.get('Content-Length') || '0');
+      const r2Key = `sop/${rowId}/${crypto.randomUUID()}-${fileName}`;
+
+      await env.SOP_FILES.put(r2Key, req.body, { httpMetadata: { contentType: fileType } });
+
+      const fileRow = await env.DB.prepare(
+        `INSERT INTO sop_files (sop_row_id, file_name, file_size, file_type, r2_key)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`
+      ).bind(rowId, fileName, fileSize, fileType, r2Key).first();
+
+      return json(fileRow, 201);
+    }
+
+    // ── SOP Files: Download ──────────────────────────────────────
+    if (method === 'GET' && path.match(/^\/api\/sop\/files\/[^/]+$/)) {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const fileId = path.split('/')[4];
+      const fileRow = await env.DB.prepare('SELECT * FROM sop_files WHERE id = ?').bind(fileId).first<{ r2_key: string; file_name: string; file_type: string }>();
+      if (!fileRow) return err('File not found', 404);
+      const object = await env.SOP_FILES.get(fileRow.r2_key);
+      if (!object) return err('File data not found', 404);
+      return new Response(object.body, {
+        headers: {
+          'Content-Type': fileRow.file_type,
+          'Content-Disposition': `attachment; filename="${fileRow.file_name}"`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    // ── SOP Files: Delete ────────────────────────────────────────
+    if (method === 'DELETE' && path.match(/^\/api\/sop\/files\/[^/]+$/)) {
+      const userOrRes = await requireAuth(req, env);
+      if (userOrRes instanceof Response) return userOrRes;
+      const fileId = path.split('/')[4];
+      const fileRow = await env.DB.prepare('SELECT r2_key FROM sop_files WHERE id = ?').bind(fileId).first<{ r2_key: string }>();
+      if (!fileRow) return err('File not found', 404);
+      await env.SOP_FILES.delete(fileRow.r2_key);
+      await env.DB.prepare('DELETE FROM sop_files WHERE id = ?').bind(fileId).run();
+      return json({ success: true });
     }
 
     return err('Not found', 404);

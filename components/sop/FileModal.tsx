@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { FileAttachment } from './types';
+import { uploadSopFile, deleteSopFile, getSopFileUrl, SopFile } from '@/lib/api';
 
 interface FileModalProps {
   rowId: string;
@@ -28,20 +29,39 @@ function getFileIcon(type: string) {
   return '📎';
 }
 
+function toAttachment(f: SopFile): FileAttachment {
+  return {
+    id: f.id,
+    fileId: f.id,
+    name: f.file_name,
+    url: getSopFileUrl(f.id),
+    size: f.file_size,
+    type: f.file_type,
+    uploadedAt: f.uploaded_at,
+  };
+}
+
 export default function FileModal({ rowId, files, sopName, onClose, onFilesChange }: FileModalProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = (fileList: FileList) => {
-    const newFiles: FileAttachment[] = Array.from(fileList).map(file => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      url: URL.createObjectURL(file),
-      size: file.size,
-      type: file.type,
-      uploadedAt: new Date().toISOString(),
-    }));
-    onFilesChange(rowId, [...files, ...newFiles]);
+  const handleFiles = async (fileList: FileList) => {
+    setUploading(true);
+    setError('');
+    try {
+      const uploaded: FileAttachment[] = [];
+      for (const file of Array.from(fileList)) {
+        const result = await uploadSopFile(rowId, file);
+        uploaded.push(toAttachment(result));
+      }
+      onFilesChange(rowId, [...files, ...uploaded]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload gagal');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -50,8 +70,13 @@ export default function FileModal({ rowId, files, sopName, onClose, onFilesChang
     if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
   };
 
-  const handleDelete = (fileId: string) => {
-    onFilesChange(rowId, files.filter(f => f.id !== fileId));
+  const handleDelete = async (file: FileAttachment) => {
+    try {
+      if (file.fileId) await deleteSopFile(file.fileId);
+      onFilesChange(rowId, files.filter(f => f.id !== file.id));
+    } catch {
+      setError('Gagal menghapus file');
+    }
   };
 
   return (
@@ -75,14 +100,23 @@ export default function FileModal({ rowId, files, sopName, onClose, onFilesChang
             onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => !uploading && fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-              isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+              isDragging ? 'border-blue-400 bg-blue-50' : uploading ? 'border-gray-200 bg-gray-50 cursor-not-allowed' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
             }`}
           >
-            <div className="text-3xl mb-2">📤</div>
-            <p className="text-sm font-medium text-gray-700">Drag & drop file di sini</p>
-            <p className="text-xs text-gray-400 mt-1">atau klik untuk memilih file</p>
+            {uploading ? (
+              <>
+                <div className="text-3xl mb-2 animate-pulse">⏳</div>
+                <p className="text-sm font-medium text-gray-500">Mengupload...</p>
+              </>
+            ) : (
+              <>
+                <div className="text-3xl mb-2">📤</div>
+                <p className="text-sm font-medium text-gray-700">Drag & drop file di sini</p>
+                <p className="text-xs text-gray-400 mt-1">atau klik untuk memilih file</p>
+              </>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -91,6 +125,7 @@ export default function FileModal({ rowId, files, sopName, onClose, onFilesChang
               onChange={e => e.target.files && handleFiles(e.target.files)}
             />
           </div>
+          {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
         </div>
 
         {/* File List */}
@@ -118,7 +153,7 @@ export default function FileModal({ rowId, files, sopName, onClose, onFilesChang
                       ⬇️
                     </a>
                     <button
-                      onClick={() => handleDelete(file.id)}
+                      onClick={() => handleDelete(file)}
                       className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50"
                     >
                       🗑️

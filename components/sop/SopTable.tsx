@@ -7,6 +7,7 @@ import FileModal from './FileModal';
 interface SopTableProps {
   rows: SOPRow[];
   onRowsChange: (rows: SOPRow[]) => void;
+  onFilesChange?: (rowId: string, files: SOPRow['lampiran']) => void;
 }
 
 const COLUMNS = [
@@ -147,7 +148,7 @@ function EditableCell({ value, rowId, field, suggestions, onSave }: EditableCell
   );
 }
 
-export default function SopTable({ rows, onRowsChange }: SopTableProps) {
+export default function SopTable({ rows, onRowsChange, onFilesChange }: SopTableProps) {
   const [filters, setFilters] = useState<FilterState>({
     kategori: '', pic: '', product: '', topik: '', subTopik: '', sopDokumen: '',
   });
@@ -162,7 +163,11 @@ export default function SopTable({ rows, onRowsChange }: SopTableProps) {
   };
 
   const updateFiles = (rowId: string, files: SOPRow['lampiran']) => {
-    onRowsChange(rows.map(r => r.id === rowId ? { ...r, lampiran: files } : r));
+    if (onFilesChange) {
+      onFilesChange(rowId, files);
+    } else {
+      onRowsChange(rows.map(r => r.id === rowId ? { ...r, lampiran: files } : r));
+    }
   };
 
   const filtered = rows.filter(row =>

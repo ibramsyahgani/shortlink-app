@@ -63,6 +63,73 @@ export async function getLogs(params?: { page?: number; action?: string; search?
 // ── Me ───────────────────────────────────────────────────────
 export async function getMe(): Promise<User> { return apiFetch('/api/me'); }
 
+// ── SOP ──────────────────────────────────────────────────────
+export interface SopFile {
+  id: string;
+  file_name: string;
+  file_size: number;
+  file_type: string;
+  r2_key: string;
+  uploaded_at: string;
+}
+
+export interface SopRowApi {
+  id: string;
+  kategori: string;
+  pic: string;
+  product: string;
+  topik: string;
+  sub_topik: string;
+  sop_dokumen: string;
+  files: SopFile[];
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getSopRows(kategori?: string): Promise<SopRowApi[]> {
+  const q = kategori ? `?kategori=${encodeURIComponent(kategori)}` : '';
+  return apiFetch(`/api/sop${q}`);
+}
+
+export async function createSopRow(data: Partial<{ kategori: string; pic: string; product: string; topik: string; subTopik: string; sopDokumen: string }>): Promise<SopRowApi> {
+  return apiFetch('/api/sop', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateSopRow(id: string, data: Partial<{ kategori: string; pic: string; product: string; topik: string; subTopik: string; sopDokumen: string }>): Promise<void> {
+  return apiFetch(`/api/sop/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteSopRow(id: string): Promise<void> {
+  return apiFetch(`/api/sop/${id}`, { method: 'DELETE' });
+}
+
+export async function uploadSopFile(rowId: string, file: File): Promise<SopFile> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('sl_token') : null;
+  const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || 'https://shortlink-api.ibramsyahgani1.workers.dev';
+  const res = await fetch(`${WORKER_URL}/api/sop/${rowId}/files`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type,
+      'Content-Length': String(file.size),
+      'X-File-Name': file.name,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: file,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error((data as { error?: string }).error || 'Upload gagal');
+  return data as SopFile;
+}
+
+export async function deleteSopFile(fileId: string): Promise<void> {
+  return apiFetch(`/api/sop/files/${fileId}`, { method: 'DELETE' });
+}
+
+export function getSopFileUrl(fileId: string): string {
+  const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_URL || 'https://shortlink-api.ibramsyahgani1.workers.dev';
+  return `${WORKER_URL}/api/sop/files/${fileId}`;
+}
+
 // ── Types ─────────────────────────────────────────────────────
 export type Role = 'user' | 'admin' | 'super_admin';
 export interface User { id: string; email: string; name: string | null; role: Role; }
